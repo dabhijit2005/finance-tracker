@@ -1,0 +1,6 @@
+{
+  "name": "PrivaTrack: Private Finance Tracker",
+  "description": "A privacy-focused personal finance tracker that parses statements locally and provides AI-driven insights without storing your personal data on servers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["AI Statement Parsing", "Data Visualization", "Budget Tracking"]
+}
