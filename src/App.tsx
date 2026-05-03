@@ -22,7 +22,10 @@ import {
   Send,
   X,
   Search,
-  Check
+  Check,
+  Plane,
+  Zap,
+  Calendar
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -41,7 +44,7 @@ import { useDropzone } from 'react-dropzone';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
-import { Transaction, SavingsInsight, TransactionCategory, Account, AccountType, DEFAULT_CATEGORIES } from './lib/types';
+import { Transaction, SavingsInsight, TransactionCategory, Account, AccountType, DEFAULT_CATEGORIES, Trip } from './lib/types';
 import { StorageService } from './lib/storage';
 import { GeminiService } from './lib/gemini';
 
@@ -82,7 +85,13 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [isParsing, setIsParsing] = useState(false);
   const [hiddenCategories, setHiddenCategories] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'accounts' | 'categories'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'accounts' | 'categories' | 'trips'>('dashboard');
+  const [trips, setTrips] = useState<Trip[]>([]);
+  const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
+  const [selectedTripTxIds, setSelectedTripTxIds] = useState<Set<string>>(new Set());
+  const [tripViewMode, setTripViewMode] = useState<'dashboard' | 'manage'>('dashboard');
+  const [isAddTripModalOpen, setIsAddTripModalOpen] = useState(false);
+  const [newTrip, setNewTrip] = useState<Partial<Trip>>({ name: '', description: '', color: '#3b82f6' });
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<TransactionCategory | 'All'>('All');
   const [selectedAccountFilter, setSelectedAccountFilter] = useState<string | 'All'>('All');
@@ -102,11 +111,12 @@ export default function App() {
 
   const loadData = async () => {
     setLoading(true);
-    const [savedTransactions, savedInsights, savedAccounts, savedCategories] = await Promise.all([
+    const [savedTransactions, savedInsights, savedAccounts, savedCategories, savedTrips] = await Promise.all([
       StorageService.getTransactions(),
       StorageService.getInsights(),
       StorageService.getAccounts(),
-      StorageService.getCategories()
+      StorageService.getCategories(),
+      StorageService.getTrips()
     ]);
 
     const currentCategories = savedCategories || [...DEFAULT_CATEGORIES];
@@ -138,6 +148,7 @@ export default function App() {
     setAccounts(currentAccounts);
     setTransactions(savedTransactions);
     setInsights(savedInsights);
+    setTrips(savedTrips);
     setLoading(false);
   };
 
@@ -312,6 +323,53 @@ export default function App() {
     setIsAccountDeleteConfirmOpen(false);
   };
 
+  const addTrip = async () => {
+    if (!newTrip.name) return;
+    const trip: Trip = {
+      id: Math.random().toString(36).substring(2, 9),
+      name: newTrip.name,
+      description: newTrip.description,
+      color: newTrip.color || '#3b82f6',
+      startDate: newTrip.startDate,
+      endDate: newTrip.endDate
+    };
+    const updatedTrips = [...trips, trip];
+    setTrips(updatedTrips);
+    await StorageService.saveTrips(updatedTrips);
+    setIsAddTripModalOpen(false);
+    setNewTrip({ name: '', description: '', color: '#3b82f6' });
+  };
+
+  const deleteTrip = async (id: string) => {
+    const updatedTrips = trips.filter(t => t.id !== id);
+    // Unlink transactions from this trip
+    const updatedTransactions = transactions.map(t => 
+      t.tripId === id ? { ...t, tripId: undefined } : t
+    );
+    setTrips(updatedTrips);
+    setTransactions(updatedTransactions);
+    await StorageService.saveTrips(updatedTrips);
+    await StorageService.saveTransactions(updatedTransactions);
+    if (selectedTripId === id) setSelectedTripId(null);
+  };
+
+  const linkToTrip = async (transactionId: string, tripId: string | null) => {
+    const updatedTransactions = transactions.map(t => 
+      t.id === transactionId ? { ...t, tripId: tripId || undefined } : t
+    );
+    setTransactions(updatedTransactions);
+    await StorageService.saveTransactions(updatedTransactions);
+  };
+
+  const bulkLinkToTrip = async (transactionIds: string[], tripId: string | null) => {
+    const updatedTransactions = transactions.map(t => 
+      transactionIds.includes(t.id) ? { ...t, tripId: tripId || undefined } : t
+    );
+    setTransactions(updatedTransactions);
+    await StorageService.saveTransactions(updatedTransactions);
+    setSelectedTripTxIds(new Set());
+  };
+
   const addAccount = async () => {
     if (!newAccount.name) return;
     const acc: Account = {
@@ -478,6 +536,7 @@ export default function App() {
             <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<TrendingUp size={18} />} label="Overview" />
             <NavItem active={activeTab === 'transactions'} onClick={() => setActiveTab('transactions')} icon={<Plus size={18} />} label="Activity" />
             <NavItem active={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')} icon={<CreditCard size={18} />} label="My Accounts" />
+            <NavItem active={activeTab === 'trips'} onClick={() => setActiveTab('trips')} icon={<Plane size={18} />} label="Travel Trips" />
             <NavItem active={activeTab === 'categories'} onClick={() => setActiveTab('categories')} icon={<Settings size={18} />} label="Categories" />
           </nav>
 
@@ -917,6 +976,84 @@ export default function App() {
                     className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl hover:bg-slate-800 disabled:opacity-50 shadow-lg shadow-slate-200"
                   >
                     Add Account
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        {/* Add Trip Modal */}
+        <AnimatePresence>
+          {isAddTripModalOpen && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm"
+            >
+              <motion.div 
+                initial={{ scale: 0.95, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.95, y: 20 }}
+                className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-200"
+              >
+                <div className="p-8 space-y-6">
+                  <div className="flex justify-between items-start">
+                    <h3 className="text-xl font-bold text-slate-900">New Trip</h3>
+                    <button onClick={() => setIsAddTripModalOpen(false)} className="text-slate-400 hover:text-slate-900 p-2">
+                      <Plus size={20} className="rotate-45" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Trip Name</label>
+                      <input 
+                        type="text" 
+                        value={newTrip.name} 
+                        onChange={(e) => setNewTrip({ ...newTrip, name: e.target.value })}
+                        placeholder="e.g. Hyderabad Trip, Goa Vacation"
+                        className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-slate-900/5 transition-all outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Description (Optional)</label>
+                      <textarea 
+                        value={newTrip.description} 
+                        onChange={(e) => setNewTrip({ ...newTrip, description: e.target.value })}
+                        placeholder="What's this trip about?"
+                        className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-slate-900/5 transition-all outline-none min-h-[100px] resize-none"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Start Date</label>
+                        <input 
+                          type="date" 
+                          value={newTrip.startDate}
+                          onChange={(e) => setNewTrip({ ...newTrip, startDate: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-slate-900/5 transition-all outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">End Date</label>
+                        <input 
+                          type="date" 
+                          value={newTrip.endDate}
+                          onChange={(e) => setNewTrip({ ...newTrip, endDate: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-slate-900/5 transition-all outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={addTrip}
+                    className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold hover:shadow-xl hover:shadow-slate-200 transition-all active:scale-[0.98]"
+                  >
+                    Create Trip
                   </button>
                 </div>
               </motion.div>
@@ -1504,6 +1641,385 @@ export default function App() {
                 </div>
               </div>
             )}
+            {activeTab === 'trips' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                  <div>
+                    <h3 className="text-xl font-bold text-slate-900">Travel & Trip Vault</h3>
+                    <p className="text-slate-500 text-sm">Organize and track expenses for specific journeys.</p>
+                  </div>
+                  <button 
+                    onClick={() => setIsAddTripModalOpen(true)}
+                    className="bg-slate-900 text-white px-6 py-3 rounded-2xl text-sm font-bold shadow-xl shadow-slate-200 hover:shadow-none transition-all flex items-center gap-2"
+                  >
+                    <Plus size={18} />
+                    New Trip
+                  </button>
+                </div>
+
+                {selectedTripId ? (() => {
+                  const currentTrip = trips.find(t => t.id === selectedTripId);
+                  const linkedTransactions = transactions.filter(t => t.tripId === selectedTripId);
+                  const suggestedTransactions = transactions.filter(t => 
+                    !t.tripId && 
+                    currentTrip?.startDate && 
+                    currentTrip?.endDate && 
+                    t.date >= currentTrip.startDate && 
+                    t.date <= currentTrip.endDate &&
+                    t.amount > 0 &&
+                    !['Salary', 'Dividends', 'Interest', 'Income', 'Cashback', 'Transfer'].includes(t.category)
+                  );
+                  
+                  return (
+                    <div className="space-y-6">
+                      {/* Trip Header */}
+                      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="flex items-center gap-4">
+                          <button 
+                            onClick={() => { setSelectedTripId(null); setSelectedTripTxIds(new Set()); setTripViewMode('dashboard'); }}
+                            className="p-2 hover:bg-slate-100 rounded-xl transition-all text-slate-400"
+                          >
+                            <ChevronRight size={20} className="rotate-180" />
+                          </button>
+                          <div>
+                            <div className="flex items-center gap-2">
+                               <h4 className="text-xl font-bold text-slate-900">{currentTrip?.name}</h4>
+                               <span className="text-[10px] bg-slate-900 text-white px-2 py-0.5 rounded-full font-bold">TRIP</span>
+                            </div>
+                            <p className="text-slate-500 text-sm">{currentTrip?.description}</p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
+                          <button 
+                            onClick={() => setTripViewMode('dashboard')}
+                            className={cn(
+                              "px-4 py-2 rounded-xl text-xs font-bold transition-all",
+                              tripViewMode === 'dashboard' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                            )}
+                          >
+                            Dashboard
+                          </button>
+                          <button 
+                            onClick={() => setTripViewMode('manage')}
+                            className={cn(
+                              "px-4 py-2 rounded-xl text-xs font-bold transition-all",
+                              tripViewMode === 'manage' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                            )}
+                          >
+                            Manage Expenses
+                          </button>
+                        </div>
+
+                        <button 
+                          onClick={() => deleteTrip(selectedTripId)}
+                          className="hidden md:block p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+
+                      {tripViewMode === 'dashboard' ? (
+                        <div className="space-y-6">
+                          {/* Trip Balance & Stats */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total cost</span>
+                              <h4 className="text-3xl font-mono font-bold text-slate-900 mt-1">
+                                {formatCurrency(linkedTransactions.reduce((sum, t) => sum + t.amount, 0))}
+                              </h4>
+                            </div>
+                            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Transactions</span>
+                              <h4 className="text-3xl font-mono font-bold text-slate-900 mt-1">
+                                {linkedTransactions.length}
+                              </h4>
+                            </div>
+                            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Date span</span>
+                              <div className="mt-1 flex items-center gap-2 text-slate-900 font-bold">
+                                <Calendar size={16} className="text-slate-400" />
+                                <span className="text-sm">{currentTrip?.startDate || '??'} to {currentTrip?.endDate || '??'}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Trip Category Breakdown */}
+                          <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+                            <h4 className="font-bold mb-8">Spending by Category for this Trip</h4>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+                              <div className="h-[250px]">
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <PieChart>
+                                    <Pie
+                                      data={Object.entries(
+                                        linkedTransactions
+                                          .reduce((acc, t) => {
+                                            acc[t.category] = (acc[t.category] || 0) + t.amount;
+                                            return acc;
+                                          }, {} as Record<string, number>)
+                                      )
+                                        .filter(([_, val]) => (val as number) > 0)
+                                        .map(([name, value]) => ({ name, value: value as number }))}
+                                      innerRadius={70}
+                                      outerRadius={90}
+                                      paddingAngle={4}
+                                      dataKey="value"
+                                    >
+                                      {Object.entries(
+                                        linkedTransactions
+                                          .reduce((acc, t) => {
+                                            acc[t.category] = (acc[t.category] || 0) + t.amount;
+                                            return acc;
+                                          }, {} as Record<string, number>)
+                                      )
+                                        .filter(([_, val]) => (val as number) > 0)
+                                        .map(([name], index) => (
+                                          <Cell key={`cell-${index}`} fill={categoryColors[name] || '#cbd5e1'} />
+                                        ))}
+                                    </Pie>
+                                    <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
+                                  </PieChart>
+                                </ResponsiveContainer>
+                              </div>
+                              <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                                 {Object.entries(
+                                  linkedTransactions
+                                    .reduce((acc, t) => {
+                                      acc[t.category] = (acc[t.category] || 0) + t.amount;
+                                      return acc;
+                                    }, {} as Record<string, number>)
+                                )
+                                  .filter(([_, val]) => (val as number) > 0)
+                                  .sort((a, b) => (b[1] as number) - (a[1] as number))
+                                  .map(([name, value]) => (
+                                    <div key={name} className="flex items-center gap-3 p-3 rounded-xl border border-slate-50 hover:bg-slate-50 transition-all">
+                                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: categoryColors[name] }} />
+                                      <span className="text-sm font-semibold text-slate-600 flex-1">{name}</span>
+                                      <span className="text-sm font-mono font-bold text-slate-900">{formatCurrency(value as number)}</span>
+                                    </div>
+                                  ))}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-6">
+                           {/* Manage Expenses UI */}
+                           <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+                             <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                               <div>
+                                 <h3 className="font-bold">Expense Management</h3>
+                                 <p className="text-slate-400 text-xs">Bulk link activities to your journey.</p>
+                               </div>
+                               
+                               <div className="flex items-center gap-2">
+                                  {selectedTripTxIds.size > 0 && (
+                                    <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-4">
+                                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{selectedTripTxIds.size} selected</span>
+                                       <button 
+                                         onClick={() => bulkLinkToTrip(Array.from(selectedTripTxIds), selectedTripId)}
+                                         className="bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-lg"
+                                       >
+                                         Add to Trip
+                                       </button>
+                                       <button 
+                                         onClick={() => bulkLinkToTrip(Array.from(selectedTripTxIds), null)}
+                                         className="bg-white text-red-600 border border-red-100 px-4 py-2 rounded-xl text-xs font-bold hover:bg-red-50"
+                                       >
+                                         Unlink
+                                       </button>
+                                       <button 
+                                          onClick={() => setSelectedTripTxIds(new Set())}
+                                          className="text-slate-400 hover:text-slate-900 p-2"
+                                       >
+                                          <X size={16} />
+                                       </button>
+                                    </div>
+                                  )}
+                               </div>
+                             </div>
+
+                             <div className="p-6 border-b border-slate-50 bg-slate-50/30">
+                                <div className="flex items-center justify-between mb-4">
+                                   <div className="flex items-center gap-2">
+                                     <Zap size={14} className="text-amber-500 fill-amber-500" />
+                                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Auto-discovered ({suggestedTransactions.length})</span>
+                                   </div>
+                                   {suggestedTransactions.length > 0 && (
+                                     <button 
+                                       onClick={() => bulkLinkToTrip(suggestedTransactions.map(t => t.id), selectedTripId)}
+                                       className="text-[10px] font-bold text-slate-900 bg-white border border-slate-200 px-3 py-1 rounded-lg hover:bg-slate-50 transition-all"
+                                     >
+                                       Link All Suggestions
+                                     </button>
+                                   )}
+                                </div>
+                                {suggestedTransactions.length > 0 ? (
+                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                    {suggestedTransactions.map(t => (
+                                      <div 
+                                        key={t.id} 
+                                        onClick={() => {
+                                          const next = new Set(selectedTripTxIds);
+                                          if (next.has(t.id)) next.delete(t.id);
+                                          else next.add(t.id);
+                                          setSelectedTripTxIds(next);
+                                        }}
+                                        className={cn(
+                                          "p-3 rounded-2xl border transition-all cursor-pointer group",
+                                          selectedTripTxIds.has(t.id) 
+                                            ? "bg-slate-900 border-slate-900 text-white" 
+                                            : "bg-white border-slate-100 hover:border-slate-300"
+                                        )}
+                                      >
+                                        <div className="flex justify-between items-start mb-1">
+                                          <span className="text-[10px] font-mono opacity-60">{t.date}</span>
+                                          <Check size={12} className={cn("transition-opacity", selectedTripTxIds.has(t.id) ? "opacity-100" : "opacity-0")} />
+                                        </div>
+                                        <p className="text-xs font-bold truncate mb-1">{t.description}</p>
+                                        <p className="text-sm font-mono font-bold">{formatCurrency(t.amount)}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-slate-400 italic">No suggested transactions found in the date range of this trip.</p>
+                                )}
+                             </div>
+
+                             <div className="overflow-x-auto">
+                                <table className="w-full text-sm text-left">
+                                  <thead className="bg-slate-50/50 text-slate-400 uppercase text-[10px] tracking-widest font-bold">
+                                    <tr>
+                                      <th className="px-6 py-4 w-10">
+                                        <input 
+                                          type="checkbox" 
+                                          onChange={(e) => {
+                                            if (e.target.checked) {
+                                              setSelectedTripTxIds(new Set(transactions.map(t => t.id)));
+                                            } else {
+                                              setSelectedTripTxIds(new Set());
+                                            }
+                                          }}
+                                          className="rounded border-slate-300 focus:ring-slate-900" 
+                                        />
+                                      </th>
+                                      <th className="px-6 py-4">Date</th>
+                                      <th className="px-6 py-4">Description</th>
+                                      <th className="px-6 py-4">Trip Status</th>
+                                      <th className="px-6 py-4 text-right">Amount</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {transactions
+                                      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                                      .map(t => (
+                                        <tr 
+                                          key={t.id} 
+                                          className={cn(
+                                            "group cursor-pointer hover:bg-slate-50 transition-colors",
+                                            selectedTripTxIds.has(t.id) && "bg-slate-50"
+                                          )}
+                                          onClick={() => {
+                                            const next = new Set(selectedTripTxIds);
+                                            if (next.has(t.id)) next.delete(t.id);
+                                            else next.add(t.id);
+                                            setSelectedTripTxIds(next);
+                                          }}
+                                        >
+                                          <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                                            <input 
+                                              type="checkbox" 
+                                              checked={selectedTripTxIds.has(t.id)}
+                                              onChange={(e) => {
+                                                const next = new Set(selectedTripTxIds);
+                                                if (e.target.checked) next.add(t.id);
+                                                else next.delete(t.id);
+                                                setSelectedTripTxIds(next);
+                                              }}
+                                              className="rounded border-slate-300 text-slate-900 focus:ring-slate-900" 
+                                            />
+                                          </td>
+                                          <td className="px-6 py-4 font-mono text-slate-400 text-xs">{t.date}</td>
+                                          <td className="px-6 py-4 font-semibold text-slate-900">{t.description}</td>
+                                          <td className="px-6 py-4">
+                                            {t.tripId === selectedTripId ? (
+                                              <span className="text-[10px] font-bold bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                                                <Check size={10} /> Linked
+                                              </span>
+                                            ) : t.tripId ? (
+                                              <span className="text-[10px] font-bold bg-slate-100 text-slate-400 px-2 py-0.5 rounded-full">
+                                                Other Trip
+                                              </span>
+                                            ) : (
+                                              <span className="text-[10px] font-bold bg-slate-50 text-slate-300 px-2 py-0.5 rounded-full">
+                                                Unlinked
+                                              </span>
+                                            )}
+                                          </td>
+                                          <td className="px-6 py-4 text-right font-mono font-bold">{formatCurrency(t.amount)}</td>
+                                        </tr>
+                                      ))}
+                                  </tbody>
+                                </table>
+                             </div>
+                           </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })() : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {trips.map(trip => {
+                      const tripTransactions = transactions.filter(t => t.tripId === trip.id);
+                      const totalCost = tripTransactions.reduce((sum, t) => sum + t.amount, 0);
+                      return (
+                        <div 
+                          key={trip.id}
+                          className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:border-slate-900 transition-all cursor-pointer group"
+                          onClick={() => { setSelectedTripId(trip.id); setTripViewMode('dashboard'); }}
+                        >
+                          <div className="flex justify-between items-start mb-4">
+                            <div className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-900 group-hover:bg-slate-900 group-hover:text-white transition-all">
+                              <Plane size={24} />
+                            </div>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); deleteTrip(trip.id); }}
+                              className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-red-500 transition-all"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                          <h4 className="text-lg font-bold text-slate-900">{trip.name}</h4>
+                          <p className="text-slate-400 text-xs mb-6 line-clamp-2">{trip.description || 'No description provided.'}</p>
+                          
+                          <div className="flex items-end justify-between">
+                            <div>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Spent</p>
+                              <p className="text-xl font-mono font-bold text-slate-900">{formatCurrency(totalCost)}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Transactions</p>
+                              <p className="text-sm font-bold text-slate-600">{tripTransactions.length}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    
+                    <button 
+                      onClick={() => setIsAddTripModalOpen(true)}
+                      className="border-2 border-dashed border-slate-200 rounded-3xl p-8 flex flex-col items-center justify-center gap-4 text-slate-400 hover:border-slate-900 hover:text-slate-900 transition-all group"
+                    >
+                      <div className="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-slate-100 transition-colors">
+                         <Plus size={24} />
+                      </div>
+                      <span className="font-bold text-sm">Create New Trip</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -1513,6 +2029,7 @@ export default function App() {
         <MobileNavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<TrendingUp size={24} />} />
         <MobileNavItem active={activeTab === 'transactions'} onClick={() => setActiveTab('transactions')} icon={<Plus size={24} />} />
         <MobileNavItem active={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')} icon={<CreditCard size={24} />} />
+        <MobileNavItem active={activeTab === 'trips'} onClick={() => setActiveTab('trips')} icon={<Plane size={24} />} />
         <MobileNavItem active={activeTab === 'categories'} onClick={() => setActiveTab('categories')} icon={<Settings size={22} />} />
       </nav>
     </div>

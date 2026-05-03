@@ -4,7 +4,7 @@
  */
 
 import { get, set, del } from 'idb-keyval';
-import { Transaction, SavingsInsight, Account } from './types';
+import { Transaction, SavingsInsight, Account, Trip } from './types';
 
 const STORAGE_KEYS = {
   TRANSACTIONS: 'privatrack_transactions',
@@ -12,6 +12,7 @@ const STORAGE_KEYS = {
   USER_PREFS: 'privatrack_prefs',
   ACCOUNTS: 'privatrack_accounts',
   CATEGORIES: 'privatrack_categories',
+  TRIPS: 'privatrack_trips',
 };
 
 export const StorageService = {
@@ -47,9 +48,18 @@ export const StorageService = {
     await set(STORAGE_KEYS.INSIGHTS, insights);
   },
 
+  async getTrips(): Promise<Trip[]> {
+    return (await get<Trip[]>(STORAGE_KEYS.TRIPS)) || [];
+  },
+
+  async saveTrips(trips: Trip[]): Promise<void> {
+    await set(STORAGE_KEYS.TRIPS, trips);
+  },
+
   async clearAll(): Promise<void> {
     await del(STORAGE_KEYS.TRANSACTIONS);
     await del(STORAGE_KEYS.INSIGHTS);
     await del(STORAGE_KEYS.ACCOUNTS);
+    await del(STORAGE_KEYS.TRIPS);
   }
 };

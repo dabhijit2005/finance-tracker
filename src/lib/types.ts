@@ -37,6 +37,15 @@ export interface Account {
   cashbackRate?: number; // Percentage, e.g., 1.5 for 1.5%
 }
 
+export interface Trip {
+  id: string;
+  name: string;
+  startDate?: string;
+  endDate?: string;
+  description?: string;
+  color?: string;
+}
+
 export interface Transaction {
   id: string;
   date: string;
@@ -45,6 +54,7 @@ export interface Transaction {
   category: TransactionCategory;
   accountId: string;
   isRecurring?: boolean;
+  tripId?: string;
 }
 
 export interface SavingsInsight {
