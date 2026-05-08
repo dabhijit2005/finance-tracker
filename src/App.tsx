@@ -25,7 +25,8 @@ import {
   Check,
   Plane,
   Zap,
-  Calendar
+  Calendar,
+  ArrowRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -443,11 +444,15 @@ export default function App() {
   });
 
   const spendingByCategory = filteredTransactions.reduce((acc, t) => {
-    if (t.category === 'Income' || t.category === 'Cashback' || t.category === 'Salary' || t.category === 'Dividends' || t.category === 'Interest' || t.category === 'Transfer') return acc;
+    if (t.category === 'Income' || t.category === 'Cashback' || t.category === 'Salary' || t.category === 'Dividends' || t.category === 'Interest' || t.category === 'Transfer' || t.category === 'Investment') return acc;
     // t.amount is positive for spends, negative for refunds/credits
     acc[t.category] = (acc[t.category] || 0) + t.amount;
     return acc;
   }, {} as Record<string, number>);
+
+  const investmentTotal = filteredTransactions
+    .filter(t => t.category === 'Investment')
+    .reduce((sum, t) => sum + t.amount, 0);
 
   const incomeByCategory = filteredTransactions.reduce((acc, t) => {
     if (t.category === 'Income' || t.category === 'Cashback' || t.category === 'Salary' || t.category === 'Dividends' || t.category === 'Interest' || t.amount < 0) {
@@ -1071,7 +1076,7 @@ export default function App() {
             {activeTab === 'dashboard' && (
               <div className="space-y-10">
                 {/* Stats Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   <StatCard 
                     label="Total Income" 
                     value={formatCurrency(filteredIncome)} 
@@ -1081,14 +1086,23 @@ export default function App() {
                   <StatCard 
                     label="Total Spending" 
                     value={formatCurrency(filteredSpending)} 
-                    subtitle={`${filteredTransactions.length} items filtered`}
+                    subtitle={`${filteredTransactions.filter(t => !['Income', 'Cashback', 'Salary', 'Dividends', 'Interest', 'Transfer', 'Investment'].includes(t.category)).length} items filtered`}
+                  />
+                  <StatCard 
+                    label="Investment Vault" 
+                    value={formatCurrency(investmentTotal)} 
+                    color="text-indigo-600"
+                    subtitle="Assets & Contributions"
                   />
                   <StatCard 
                     label="Net Savings" 
-                    value={formatCurrency(filteredIncome - filteredSpending)} 
+                    value={formatCurrency(filteredIncome - filteredSpending - investmentTotal)} 
                     color="text-emerald-500"
-                    subtitle={`Savings rate: ${filteredIncome > 0 ? Math.round(( (filteredIncome - filteredSpending) / filteredIncome) * 100) : 0}%`}
+                    subtitle={`Savings rate: ${filteredIncome > 0 ? Math.round(( (filteredIncome - filteredSpending - investmentTotal) / filteredIncome) * 100) : 0}%`}
                   />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-2">
                   <StatCard 
                     label="Cashback Earned" 
                     value={formatCurrency(filteredCashback)} 
@@ -1298,101 +1312,132 @@ export default function App() {
                   </section>
                 </div>
 
-                {/* Savings Insights */}
-                <div className="bg-slate-900 text-white p-8 rounded-3xl shadow-xl flex flex-col md:flex-row gap-8 relative overflow-hidden">
-                  <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 blur-[80px]" />
-                  <div className="md:w-1/3 space-y-4 relative">
-                    <div className="flex items-center gap-3 mb-4">
-                       <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center text-sm">💡</div>
-                       <h4 className="font-bold text-sm uppercase tracking-wider">AI Optimizer</h4>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col lg:col-span-1">
+                    <div className="flex justify-between items-center mb-6">
+                      <div className="flex items-center gap-2">
+                        <TrendingUp size={18} className="text-indigo-600" />
+                        <h4 className="font-bold">Investment Portfolio</h4>
+                      </div>
                     </div>
-                    <p className="text-sm text-slate-400 leading-relaxed">
-                      AI scans your card benefits vs actual spending to find missed cashbacks and better payment options.
-                    </p>
-                    <div className="flex flex-col gap-3">
-                      <button 
-                        onClick={refreshInsights}
-                        disabled={isAnalyzing || transactions.length === 0}
-                        className="flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed group w-full"
-                      >
-                        <Sparkles size={14} className={cn("text-emerald-400", isAnalyzing && "animate-pulse")} />
-                        {isAnalyzing ? 'Analyzing Patterns...' : 'Refresh Optimization'}
-                      </button>
+                    <div className="space-y-4 flex-1">
+                      <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 italic text-slate-500 text-xs leading-relaxed">
+                        Track your wealth growth separately from your daily expenses.
+                      </div>
+                      
+                      <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                        {filteredTransactions
+                          .filter(t => t.category === 'Investment')
+                          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                          .slice(0, 5)
+                          .map(t => (
+                            <div key={t.id} className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-50 hover:border-slate-200 transition-all">
+                              <div>
+                                <p className="text-xs font-bold text-slate-900 truncate max-w-[120px]">{t.description}</p>
+                                <p className="text-[10px] text-slate-400 font-mono">{t.date}</p>
+                              </div>
+                              <span className="text-sm font-mono font-bold text-indigo-600">+{formatCurrency(t.amount)}</span>
+                            </div>
+                          ))}
+                        
+                        {filteredTransactions.filter(t => t.category === 'Investment').length === 0 && (
+                          <div className="text-center py-8">
+                            <Plane size={24} className="mx-auto text-slate-200 mb-2" />
+                            <p className="text-[10px] uppercase font-bold text-slate-400">No investments found</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        setSelectedCategoryFilter('Investment');
+                        setActiveTab('transactions');
+                      }}
+                      className="w-full mt-4 py-3 rounded-xl border border-slate-100 text-xs font-bold text-slate-500 hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
+                    >
+                      View All Investments <ArrowRight size={12} />
+                    </button>
+                  </section>
 
-                      <form onSubmit={handleAskAi} className="space-y-2 mt-4 pt-4 border-t border-white/10">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Ask a question</label>
-                        <div className="relative">
+                  <div className="lg:col-span-2">
+                    <div className="bg-slate-900 text-white p-8 h-full rounded-3xl shadow-xl flex flex-col gap-6 relative overflow-hidden">
+                      <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 blur-[80px]" />
+                      <div className="space-y-4 relative">
+                        <div className="flex justify-between items-center">
+                          <div className="flex items-center gap-3">
+                             <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center text-sm">💡</div>
+                             <h4 className="font-bold text-sm uppercase tracking-wider">AI Optimizer</h4>
+                          </div>
+                          <button 
+                            onClick={refreshInsights}
+                            disabled={isAnalyzing || transactions.length === 0}
+                            className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-[10px] font-bold transition-all disabled:opacity-50 flex items-center gap-2"
+                          >
+                            <Sparkles size={12} className={cn(isAnalyzing && "animate-pulse")} />
+                            {isAnalyzing ? 'Analyzing...' : 'Refresh'}
+                          </button>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {insights.slice(0, 4).map((insight, i) => {
+                            const isOptimization = accounts.some(a => insight.suggestion.toLowerCase().includes(a.name.toLowerCase()));
+                            return (
+                              <div key={i} className={cn(
+                                "p-4 rounded-2xl border transition-all cursor-default",
+                                isOptimization 
+                                  ? "bg-emerald-500/10 border-emerald-500/20 hover:border-emerald-500/40" 
+                                  : "bg-white/5 border-white/5 hover:border-white/10"
+                              )}>
+                                <div className="flex items-start gap-3">
+                                  {isOptimization && <CreditCard size={14} className="text-emerald-400 mt-0.5 flex-shrink-0" />}
+                                  <div className="space-y-1">
+                                    <h5 className={cn("text-[10px] font-bold uppercase tracking-widest", isOptimization ? "text-emerald-400" : "text-slate-400")}>
+                                      {isOptimization ? 'Optimization Tip' : 'Savings Insight'}
+                                    </h5>
+                                    <p className="text-[13px] leading-relaxed font-medium">
+                                      {insight.suggestion.includes(insight.potentialSavings.toString()) ? (
+                                        insight.suggestion
+                                      ) : (
+                                        <>
+                                          {insight.suggestion} Gain <span className="font-bold text-emerald-400">{formatCurrency(insight.potentialSavings)}</span>.
+                                        </>
+                                      )}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {insights.length === 0 && (
+                            <div className="col-span-2 py-4 text-slate-500 text-xs italic">
+                              Upload a statement for personalized AI insights.
+                            </div>
+                          )}
+                        </div>
+
+                        <form onSubmit={handleAskAi} className="pt-4 border-t border-white/10 flex gap-2">
                           <input 
                             value={aiQuestion}
                             onChange={e => setAiQuestion(e.target.value)}
-                            placeholder="How much did I spend on food?"
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs font-medium outline-none focus:border-emerald-500/50 transition-colors pr-10"
+                            placeholder="Ask AI about your spending..."
+                            className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs font-medium outline-none focus:border-emerald-500/50 transition-colors"
                           />
                           <button 
                             type="submit"
                             disabled={isAsking || !aiQuestion.trim()}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-emerald-400 p-1 disabled:opacity-30"
+                            className="bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 p-2 rounded-xl disabled:opacity-30"
                           >
                             <Send size={14} />
                           </button>
-                        </div>
+                        </form>
                         {aiAnswer && (
-                          <motion.div 
-                            initial={{ opacity: 0, y: 5 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="bg-white/5 border border-white/5 p-3 rounded-xl relative"
-                          >
-                            <button 
-                              onClick={() => setAiAnswer(null)}
-                              className="absolute top-1 right-1 p-1 text-white/20 hover:text-white"
-                            >
-                              <X size={10} />
-                            </button>
-                            <p className="text-[12px] leading-relaxed text-slate-300">
-                              {aiAnswer}
-                            </p>
-                          </motion.div>
-                        )}
-                      </form>
-                    </div>
-                  </div>
-                  
-                  <div className="md:w-2/3 grid grid-cols-1 md:grid-cols-2 gap-4 relative">
-                    {insights.length > 0 ? insights.map((insight, i) => {
-                      // Detect if it's a card optimization tip (usually mentions a card name)
-                      const isOptimization = accounts.some(a => insight.suggestion.toLowerCase().includes(a.name.toLowerCase()));
-                      
-                      return (
-                        <div key={i} className={cn(
-                          "p-4 rounded-2xl border transition-all cursor-default",
-                          isOptimization 
-                            ? "bg-emerald-500/10 border-emerald-500/20 hover:border-emerald-500/40" 
-                            : "bg-white/5 border-white/5 hover:border-white/10"
-                        )}>
-                          <div className="flex items-start gap-3">
-                            {isOptimization && <CreditCard size={14} className="text-emerald-400 mt-0.5 flex-shrink-0" />}
-                            <div className="space-y-1">
-                              <h5 className={cn("text-[10px] font-bold uppercase tracking-widest", isOptimization ? "text-emerald-400" : "text-slate-400")}>
-                                {isOptimization ? 'Optimization Tip' : 'Savings Insight'}
-                              </h5>
-                              <p className="text-[13px] leading-relaxed font-medium">
-                                {insight.suggestion.includes(insight.potentialSavings.toString()) ? (
-                                  insight.suggestion
-                                ) : (
-                                  <>
-                                    {insight.suggestion} You could gain <span className="font-bold text-emerald-400">{formatCurrency(insight.potentialSavings)}</span>.
-                                  </>
-                                )}
-                              </p>
-                            </div>
+                          <div className="bg-white/5 border border-white/5 p-3 rounded-xl relative text-[12px] leading-relaxed text-slate-300">
+                             <button onClick={() => setAiAnswer(null)} className="absolute top-1 right-1 p-1 text-white/20 hover:text-white"><X size={10} /></button>
+                             {aiAnswer}
                           </div>
-                        </div>
-                      );
-                    }) : (
-                      <div className="col-span-2 py-6 text-slate-500 text-sm italic">
-                        Upload a statement to generate personalized insights.
+                        )}
                       </div>
-                    )}
+                    </div>
                   </div>
                 </div>
               </div>
